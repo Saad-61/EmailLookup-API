@@ -1,0 +1,13 @@
+version: '3.7'
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./searxng:/etc/searxng
+    environment:
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-antigravity_secret_key_123}
+    restart: unless-stopped

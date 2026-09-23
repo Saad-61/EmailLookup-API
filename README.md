@@ -10,7 +10,7 @@ A lightweight, high-performance REST API for reverse email lookups, social profi
 - **Cache & Force Refresh**: Lookup results are cached in SQLite for 24 hours. Pass `"force_refresh": true` to force a live refresh.
 - **Cache Invalidation (`POST /api/cache/invalidate`)**: Explicitly purge cache for a target email.
 - **SMTP Verifier (`POST /api/verify`)**: Direct socket MX queries, SMTP handshake validation, catch-all detection, and deliverability checks (cached for 6 hours).
-- **Port 25 Probe (`GET /api/port-check`)**: Verifies outbound SMTP connectivity.
+- **Optional SearXNG Integration**: Dockerized local search proxy for deep LinkedIn and social profile discovery.
 
 ---
 
@@ -20,7 +20,7 @@ A lightweight, high-performance REST API for reverse email lookups, social profi
 
 ```bash
 # Clone repository
-git clone https://github.com/your-username/EmailLookup-API.git
+git clone https://github.com/Saad-61/EmailLookup-API.git
 cd EmailLookup-API
 
 # Create virtual environment
@@ -44,13 +44,23 @@ cp .env.example .env
 
 Add your `GITHUB_TOKEN` to `.env` for higher rate limits on GitHub profile lookups.
 
-### 3. Run the Server
+### 3. Optional: Start SearXNG Engine (Recommended for Deep Social Discovery)
+
+To enable live web candidate discovery (LinkedIn, Instagram, TikTok via Yandex/Startpage):
+
+```bash
+docker compose up -d
+```
+
+Ensure `SEARXNG_URL=http://localhost:8888/search` is set in your `.env`.
+
+### 4. Run the API Server
 
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-Interactive OpenAPI Documentation will be available at: [http://localhost:8000/docs](http://localhost:8000/docs)
+Interactive OpenAPI Documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
@@ -107,6 +117,9 @@ EmailLookup-API/
 │   └── models.py           # Pydantic request/response models
 ├── data/                   # Persistent cache directory
 │   └── cache.db
+├── searxng/                # SearXNG configuration
+│   └── settings.yml
+├── docker-compose.yml      # SearXNG container setup
 ├── .env.example
 ├── .gitignore
 ├── requirements.txt
