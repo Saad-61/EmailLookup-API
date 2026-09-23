@@ -1,0 +1,29 @@
+# Environment Variables & Secrets
+.env
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+.venv/
+env/
+venv/
+ENV/
+
+# Data & Database files (Exclude large SQLite DBs and CSVs from Git)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.csv
+data/*.json
+!data/.gitkeep
+
+# IDE & OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
