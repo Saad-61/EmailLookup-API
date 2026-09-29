@@ -44,7 +44,11 @@ Copy `.env.example` to `.env`:
 cp .env.example .env
 ```
 
-Add your `GITHUB_TOKEN` to `.env` for higher rate limits on GitHub profile lookups.
+Configure your environment variables in `.env`:
+- **`GITHUB_TOKEN`**: (Recommended) GitHub Personal Access Token to increase API rate limits from 60 to 5,000 req/hour.
+- **`PROXY_IPS` / `PROXY_USERNAME` / `PROXY_PASSWORD`**: (Optional) Dynamic residential proxy pool for DuckDuckGo rotation & direct probing.
+- **`SPOTIFY_CLIENT_TOKEN` / `SPOTIFY_AUTH_TOKEN`**: (Optional) Web Bearer tokens for Spotify Pathfinder GraphQL user searches.
+- **`SMTP_SENDER_EMAIL` / `SMTP_HELO_HOST`**: Configures the HELO host and sender email address for Port 25 SMTP handshake verifications.
 
 ### 3. Run the API Server
 

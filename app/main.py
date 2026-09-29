@@ -88,6 +88,9 @@ async def root():
     }
 
 
+FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 async def serve_favicon_ico():
     svg_path = os.path.join(FRONTEND_DIR, "favicon.svg")

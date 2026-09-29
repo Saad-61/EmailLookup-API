@@ -23,6 +23,8 @@ from typing import List, Optional, Dict, Any, Tuple
 import httpx
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*duckduckgo_search.*")
 
 try:
     from ddgs import DDGS
@@ -170,9 +172,11 @@ class DynamicProxyPool:
     def sample_distinct(self, n: int) -> List[str]:
         """Sample n distinct clean IPs, prioritizing the fastest responsive nodes."""
         clean = self.get_clean_ips()
+        if not clean:
+            return ["" for _ in range(n)]
         if len(clean) >= n:
             return clean[:n]
-        return (clean * (n // max(1, len(clean)) + 1))[:n]
+        return (clean * (n // len(clean) + 1))[:n]
 
 
 proxy_pool = DynamicProxyPool(ALL_PROXY_IPS, cooldown_seconds=600)
@@ -1576,7 +1580,7 @@ async def execute_ddg_html_query(
     for ip in available_ips[:2]:
         attempts += 1
         used_ip = ip
-        proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{ip}" if (PROXY_USER and PROXY_PASS) else f"http://{ip}"
+        proxy_url = (f"http://{PROXY_USER}:{PROXY_PASS}@{ip}" if (PROXY_USER and PROXY_PASS) else f"http://{ip}") if ip else None
         t0 = time.time()
         try:
             items = await asyncio.to_thread(_query_ddgs_sync, query, proxy_url, 4.5)
