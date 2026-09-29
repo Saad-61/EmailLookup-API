@@ -28,6 +28,30 @@ class PlatformResult(BaseModel):
     url: Optional[str] = None
 
 
+class EvidenceItem(BaseModel):
+    type: str  # 'handle_match', 'name_match', 'company_match', 'location_match'
+    source: str  # 'github', 'searxng_yandex', 'instagram_og', etc.
+    value: str
+    signal_strength: Optional[str] = "medium"  # 'strong', 'medium', 'weak'
+
+
+class SocialCandidate(BaseModel):
+    platform: str
+    platform_label: str
+    handle: str
+    name: Optional[str] = None
+    url: str
+    snippet: Optional[str] = None
+    score: int
+    confidence_badge: Optional[str] = ""
+    confidence_level: str = "potential"  # 'strong' or 'potential'
+    reasons: List[str] = []
+    evidence: List[EvidenceItem] = []
+    sub_scores: dict = {}
+    avatar_url: Optional[str] = None
+    discovery_method: str = "probing"  # 'probing' or 'querying'
+
+
 class LookupResponse(BaseModel):
     email: str
     query_time_ms: int
@@ -41,7 +65,6 @@ class LookupResponse(BaseModel):
     deliverability: Optional[str] = None
     autocorrect: Optional[str] = None
     company: Optional[dict] = None
-    email_quality: Optional[dict] = None
     social_candidates: List[dict] = []
     social_candidates_by_platform: dict = {}
     cached: bool = False

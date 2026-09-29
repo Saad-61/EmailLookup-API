@@ -31,9 +31,9 @@ except Exception:
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"), override=True)
 try:
-    from social_finder import search_social_candidates
+    from social_finder import search_social_candidates, jaro_winkler_similarity
 except ImportError:
-    from app.social_finder import search_social_candidates
+    from social_finder import search_social_candidates, jaro_winkler_similarity
 
 EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
@@ -113,48 +113,78 @@ def detect_email_typo(email: str) -> Optional[str]:
     return None
 
 
+TITLE_PREFIXES = {
+    "ch", "chaudhry", "chaudhary", "dr", "engr", "eng", "mr", "ms", "mrs", 
+    "prof", "syed", "sh", "sk", "sheikh", "md", "muhd", "malik", "adv", "al", "el", "haj", "haji"
+}
+
+ROLE_SUFFIXES = {
+    "hr", "dev", "qa", "ceo", "cto", "cfo", "coo", "cmo", "admin", "recruiter", 
+    "sales", "support", "help", "jobs", "hiring", "team", "legal", "ops", "design", "tech", "official"
+}
+
 COMMON_FIRST_NAMES = {
-    "muhammad", "mohammed", "mohammad", "hassan", "hasan", "ali", "ahmed", "ahmad",
-    "umar", "omer", "usman", "osman", "hamza", "bilal", "saad", "usama", "osama",
-    "noman", "nouman", "dameesha", "zohaib", "shahzaib", "tariq", "waseem", "danish",
-    "raza", "faisal", "farhan", "kamran", "adeel", "zeeshan", "asif", "kashif",
-    "arslan", "waqas", "waqar", "ghaffar", "imran", "irfan", "rehman", "salman",
-    "david", "john", "michael", "james", "robert", "william", "joseph", "thomas",
-    "charles", "daniel", "matthew", "anthony", "donald", "mark", "paul", "steven",
-    "andrew", "joshua", "kevin", "brian", "george", "edward", "ronald", "timothy",
-    "jason", "jeffrey", "ryan", "jacob", "gary", "nicholas", "eric", "jonathan",
-    "stephen", "larry", "justin", "scott", "brandon", "benjamin", "samuel", "gregory",
-    "alexander", "frank", "patrick", "raymond", "jack", "dennis", "jerry", "tyler",
-    "aaron", "jose", "adam", "nathan", "henry", "douglas", "zachary", "peter", "kyle",
-    "noah", "ethan", "jeremy", "walter", "christian", "keith", "roger", "terry", "austin",
-    "sean", "gerald", "carl", "harold", "dylan", "arthur", "lawrence", "jordan", "jesse",
-    "bryan", "billy", "bruce", "gabriel", "joe", "logan", "alan", "juan", "albert",
-    "willie", "elijah", "wayne", "randy", "vincent", "mason", "roy", "ralph", "bobby",
-    "eugene", "sharafat", "momina", "sundar", "satya", "elon", "atisam", "ahtisham",
-    "noman", "nouman", "nauman", "saad", "ali", "muhammad", "mohammad", "ahmed", "ahmad",
-    "dameesha", "hamza", "usman", "bilal", "hassan", "hussain", "zain", "omer", "umar",
-    "faisal", "farhan", "kashif", "patrick", "john", "david", "michael", "sarah", "emma",
-    "alex", "daniel", "haseeb", "asif", "dilawar", "rauf", "hameed", "collison", "ghaffar"
+    "fahad", "ahmad", "ahmed", "saad", "noman", "nouman", "nauman", "ali", "hamza", "usman", "osman",
+    "bilal", "hassan", "hasan", "hussain", "zain", "omer", "umar", "faisal", "farhan", 
+    "kashif", "tariq", "asif", "dameesha", "ahtisham", "atisam", "dilawar", "hameed",
+    "ghaffar", "rashid", "tahir", "nasir", "amir", "aamir", "sami", "haris", "junaid",
+    "waseem", "wasim", "naveed", "navid", "arshad", "akram", "aslam", "iqbal", "anwar",
+    "akhtar", "latif", "mahmood", "mehmood", "butt", "dar", "bhatti", "rana", "khan",
+    "chaudhry", "malik", "sheikh", "syed", "shah", "javed", "javaid", "siddiqui",
+    "qureshi", "ansari", "farooqi", "abbasi", "mirza", "baig", "mughal", "rehman",
+    "rahman", "aziz", "khalid", "sultan", "alam", "raza", "ashraf", "munir", "zafar",
+    "nawaz", "sarwar", "liaquat", "abid", "sajid", "majid", "zahid", "shahzad",
+    "khurram", "shahbaz", "tanveer", "tanvir", "waheed", "wahid", "yousaf", "yusuf",
+    "yaqoob", "ayub", "arouba", "ayesha", "fatima", "zainab", "maryam", "mariam",
+    "hira", "sana", "iqra", "amna", "sadia", "mahnoor", "anmol", "noor", "rabia",
+    "sidra", "kinza", "alishba", "hafsa", "laiba", "bisma", "aiman", "nimra",
+    "bushra", "sumaira", "shazia", "rubina", "farzana", "tahira", "samina", "yasmeen",
+    "shabnam", "nasreen", "parveen", "uzma", "fauzia", "fozia", "saima", "asifa",
+    "nida", "fariha", "hina", "madiha", "kiran", "mehwish", "komal", "natasha", "sonia",
+    "erik", "john", "david", "michael", "james", "robert", "william", "richard",
+    "thomas", "charles", "daniel", "matthew", "anthony", "mark", "donald", "steven",
+    "paul", "andrew", "joshua", "kenneth", "kevin", "brian", "george", "timothy",
+    "ronald", "jason", "jeffrey", "ryan", "jacob", "gary", "nicholas", "eric",
+    "jonathan", "stephen", "larry", "justin", "scott", "brandon", "benjamin", "samuel",
+    "gregory", "alexander", "frank", "patrick", "raymond", "jack", "dennis", "jerry",
+    "tyler", "aaron", "jose", "adam", "nathan", "henry", "douglas", "zachary", "peter",
+    "kyle", "walter", "ethan", "jeremy", "harold", "keith", "christian", "roger", "noah",
+    "gerald", "carl", "terry", "sean", "austin", "arthur", "lawrence", "jesse", "dylan",
+    "bryan", "joe", "jordan", "billy", "albert", "bruce", "willie", "gabriel", "logan",
+    "alan", "juan", "wayne", "roy", "ralph", "randy", "eugene", "vincent", "russell",
+    "louis", "philip", "bobby", "johnny", "bradley", "haseeb", "rauf", "collison"
 }
 
 
 def split_concatenated_name(local_part: str) -> Optional[str]:
     """
-    Parses concatenated names from personal email usernames without delimiters.
+    Parses concatenated names from personal email usernames with or without delimiters and titles.
     e.g. 'nomanghaffar074' -> 'Noman Ghaffar'
-         'satyanadella' -> 'Satya Nadella'
-         'mominawaqar18' -> 'Momina Waqar'
+         'ch.fahadahmad11' -> 'Ch Fahad Ahmad'
+         'dr.saadasif99'   -> 'Dr Saad Asif'
+         'mominawaqar18'   -> 'Momina Waqar'
     """
     if not local_part:
         return None
-    s = re.sub(r"[\d._+-]+", "", local_part.lower()).strip()
-    if len(s) < 5:
+    clean = re.sub(r"[\d._+-]+", "", local_part.lower()).strip()
+    if len(clean) < 4:
         return None
+
+    # Check for title prefix
+    title = ""
+    s = clean
+    for t in sorted(TITLE_PREFIXES, key=len, reverse=True):
+        if s.startswith(t) and len(s) >= len(t) + 4:
+            title = t.capitalize()
+            s = s[len(t):]
+            break
+
     for fn in sorted(COMMON_FIRST_NAMES, key=len, reverse=True):
         if s.startswith(fn) and len(s) > len(fn):
             remainder = s[len(fn):]
             if remainder.isalpha() and len(remainder) >= 2:
-                return f"{fn.capitalize()} {remainder.capitalize()}"
+                core = f"{fn.capitalize()} {remainder.capitalize()}"
+                return f"{title} {core}".strip() if title else core
     return None
 
 
@@ -457,15 +487,19 @@ async def lookup_gravatar(email: str, client: httpx.AsyncClient) -> dict:
                     or ""
                 ).lower()
                 if "linkedin" in label or "linkedin.com" in url:
-                    result["linkedin"] = url
+                    cl = clean_social_url(url, "linkedin")
+                    if cl: result["linkedin"] = cl
                 elif "github" in label or "github.com" in url:
                     result["github_url"] = url
                 elif "twitter" in label or "x.com" in url or "twitter.com" in url:
-                    result["twitter_url"] = url
+                    cl = clean_social_url(url, "twitter")
+                    if cl: result["twitter_url"] = cl
                 elif "instagram" in label or "instagram.com" in url:
-                    result["instagram_url"] = url
+                    cl = clean_social_url(url, "instagram")
+                    if cl: result["instagram_url"] = cl
                 elif "facebook" in label or "facebook.com" in url:
-                    result["facebook_url"] = url
+                    cl = clean_social_url(url, "facebook")
+                    if cl: result["facebook_url"] = cl
                 elif "youtube" in label or "youtube.com" in url:
                     result["youtube_url"] = url
                 elif not result.get("website") and url and not any(k in url for k in ["gravatar.com", "wordpress.com"]):
@@ -499,6 +533,113 @@ async def fetch_github_readme(username: str, client: httpx.AsyncClient) -> str:
         except Exception:
             pass
     return ""
+
+
+RESERVED_SOCIAL_SLUGS = {
+    "https", "http", "www", "com", "net", "org", "null", "undefined",
+    "p", "reel", "reels", "stories", "explore", "direct", "accounts", "about", "developer", "legal",
+    "dir", "pub", "feed", "jobs", "company", "school", "pulse", "posts", "learning",
+    "home", "search", "notifications", "messages", "settings", "i", "privacy", "tos", "intent", "share",
+    "sharer", "login", "recover", "help", "policies", "pages", "groups", "events", "watch", "photo", "photos", "video", "videos"
+}
+
+
+def clean_social_url(raw_url: Optional[str], platform: Optional[str] = None) -> Optional[str]:
+    """
+    Sanitizes raw social media URLs from bios, web pages, or markdown badges.
+    Un-nests duplicated/nested schemes (e.g. 'https://linkedin.com/in/https://www.linkedin.com/in/slug').
+    Discards invalid protocol slugs (e.g. 'https', 'www', 'dir', 'pub').
+    """
+    if not raw_url or not isinstance(raw_url, str):
+        return None
+
+    s = raw_url.strip().strip(")>]\'\",.")
+    if not s:
+        return None
+
+    # Un-nest repeated protocols (common typo in markdown badge generators)
+    m_nested = list(re.finditer(r"https?:/+", s, re.IGNORECASE))
+    if len(m_nested) > 1:
+        s = s[m_nested[-1].start():]
+    # Normalize malformed https:/ to https://
+    s = re.sub(r"^(https?):/+([^\s/])", r"\1://\2", s, flags=re.IGNORECASE)
+
+    clean_low = s.lower()
+
+    # 1. LinkedIn
+    if "linkedin.com/in/" in clean_low and (platform is None or platform == "linkedin"):
+        m = re.search(r"linkedin\.com/in/([a-zA-Z0-9_/%-]+)", s, re.IGNORECASE)
+        if m:
+            slug = m.group(1).split("?")[0].rstrip("/").strip()
+            if slug.lower() not in RESERVED_SOCIAL_SLUGS and len(slug) >= 3:
+                return f"https://www.linkedin.com/in/{slug}"
+        return None
+
+    # 2. Instagram
+    if "instagram.com/" in clean_low and (platform is None or platform == "instagram"):
+        m = re.search(r"instagram\.com/([a-zA-Z0-9_.]{2,30})", s, re.IGNORECASE)
+        if m:
+            handle = m.group(1).split("?")[0].rstrip("/").strip().lstrip("@")
+            if handle.lower() not in RESERVED_SOCIAL_SLUGS and len(handle) >= 2:
+                return f"https://www.instagram.com/{handle}/"
+        return None
+
+    # 3. Twitter / X
+    if any(dom in clean_low for dom in ("twitter.com/", "x.com/")) and (platform is None or platform == "twitter"):
+        m = re.search(r"(?:x\.com|twitter\.com)/([a-zA-Z0-9_]{1,25})", s, re.IGNORECASE)
+        if m:
+            handle = m.group(1).split("?")[0].rstrip("/").strip().lstrip("@")
+            if handle.lower() not in RESERVED_SOCIAL_SLUGS and len(handle) >= 2:
+                return f"https://x.com/{handle}"
+        return None
+
+    # 4. Facebook
+    if "facebook.com/" in clean_low and (platform is None or platform == "facebook"):
+        m_ppl = re.search(r"facebook\.com/people/([^/?#]+)/(\d+)", s, re.IGNORECASE)
+        if m_ppl:
+            return f"https://www.facebook.com/people/{m_ppl.group(1)}/{m_ppl.group(2)}/"
+        m = re.search(r"facebook\.com/([a-zA-Z0-9_.]{3,50})", s, re.IGNORECASE)
+        if m:
+            handle = m.group(1).split("?")[0].rstrip("/").strip()
+            if handle.lower() not in RESERVED_SOCIAL_SLUGS and len(handle) >= 3:
+                return f"https://www.facebook.com/{handle}"
+        return None
+
+    # 5. Spotify
+    if "spotify.com/user/" in clean_low and (platform is None or platform == "spotify"):
+        m = re.search(r"spotify\.com/user/([a-zA-Z0-9_.-]{2,50})", s, re.IGNORECASE)
+        if m:
+            handle = m.group(1).split("?")[0].rstrip("/").strip()
+            if handle.lower() not in RESERVED_SOCIAL_SLUGS and len(handle) >= 2:
+                return f"https://open.spotify.com/user/{handle}"
+        return None
+
+    return None
+
+
+def extract_clean_social_links_from_text(text: str) -> dict[str, str]:
+    """Extract and sanitize social profile URLs from bio, blog, or README text."""
+    if not text:
+        return {}
+    results = {}
+    raw_urls = re.findall(r"https?://[^\s)\]\"'>]+", text)
+    for raw in raw_urls:
+        if not results.get("linkedin"):
+            cl = clean_social_url(raw, platform="linkedin")
+            if cl: results["linkedin"] = cl
+        if not results.get("instagram"):
+            cl = clean_social_url(raw, platform="instagram")
+            if cl: results["instagram"] = cl
+        if not results.get("twitter"):
+            cl = clean_social_url(raw, platform="twitter")
+            if cl: results["twitter"] = cl
+        if not results.get("facebook"):
+            cl = clean_social_url(raw, platform="facebook")
+            if cl: results["facebook"] = cl
+        if not results.get("spotify"):
+            cl = clean_social_url(raw, platform="spotify")
+            if cl: results["spotify"] = cl
+    return results
 
 
 # ── GitHub ────────────────────────────────────────────────────────────────────
@@ -704,39 +845,32 @@ async def lookup_github(
                     try:
                         for acc in social_resp.json():
                             prov = (acc.get("provider") or "").lower()
-                            a_url = (acc.get("url") or "").split("?")[0].rstrip("/")
-                            if not linkedin_direct and (prov == "linkedin" or "linkedin.com/in" in a_url):
-                                linkedin_direct = a_url
-                            elif not twitter_direct and (prov in ("twitter", "x") or "twitter.com/" in a_url or "x.com/" in a_url):
-                                twitter_direct = a_url
-                            elif not instagram_direct and (prov == "instagram" or "instagram.com/" in a_url):
-                                instagram_direct = a_url
-                            elif not facebook_direct and (prov == "facebook" or "facebook.com/" in a_url):
-                                facebook_direct = a_url
+                            a_url = acc.get("url") or ""
+                            if not linkedin_direct and (prov == "linkedin" or "linkedin.com/in" in a_url.lower()):
+                                linkedin_direct = clean_social_url(a_url, platform="linkedin")
+                            elif not twitter_direct and (prov in ("twitter", "x") or "twitter.com/" in a_url.lower() or "x.com/" in a_url.lower()):
+                                twitter_direct = clean_social_url(a_url, platform="twitter")
+                            elif not instagram_direct and (prov == "instagram" or "instagram.com/" in a_url.lower()):
+                                instagram_direct = clean_social_url(a_url, platform="instagram")
+                            elif not facebook_direct and (prov == "facebook" or "facebook.com/" in a_url.lower()):
+                                facebook_direct = clean_social_url(a_url, platform="facebook")
                     except Exception:
                         pass
 
-                # 2. Bio text links
+                # 2. Bio, blog, and README markdown links (with un-nesting)
                 combined_texts = [bio_text, blog_text, (readme_text if isinstance(readme_text, str) else "")]
                 for text_block in combined_texts:
                     if not text_block:
                         continue
-                    if not linkedin_direct:
-                        m = re.search(r"https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[a-zA-Z0-9_/%-]+", text_block)
-                        if m:
-                            linkedin_direct = m.group(0).split("?")[0].rstrip(").,]>")
-                    if not twitter_direct:
-                        m = re.search(r"https?://(?:[a-z0-9-]+\.)?(?:x\.com|twitter\.com)/[a-zA-Z0-9_]+", text_block)
-                        if m and not any(k in m.group(0).lower() for k in ("/status", "/home", "/search", "/intent")):
-                            twitter_direct = m.group(0).split("?")[0].rstrip(").,]>")
-                    if not instagram_direct:
-                        m = re.search(r"https?://(?:www\.)?instagram\.com/[a-zA-Z0-9_.]+", text_block)
-                        if m and not any(k in m.group(0).lower() for k in ("/p/", "/reel", "/explore")):
-                            instagram_direct = m.group(0).split("?")[0].rstrip(").,]>")
-                    if not facebook_direct:
-                        m = re.search(r"https?://(?:www\.)?facebook\.com/[a-zA-Z0-9_.]+", text_block)
-                        if m and not any(k in m.group(0).lower() for k in ("/sharer", "/pages", "/groups", "/events")):
-                            facebook_direct = m.group(0).split("?")[0].rstrip(").,]>")
+                    extracted = extract_clean_social_links_from_text(text_block)
+                    if not linkedin_direct and extracted.get("linkedin"):
+                        linkedin_direct = extracted["linkedin"]
+                    if not twitter_direct and extracted.get("twitter"):
+                        twitter_direct = extracted["twitter"]
+                    if not instagram_direct and extracted.get("instagram"):
+                        instagram_direct = extracted["instagram"]
+                    if not facebook_direct and extracted.get("facebook"):
+                        facebook_direct = extracted["facebook"]
 
                 if not phone and isinstance(readme_text, str) and readme_text:
                     ph_match = re.search(r"\+?\d{1,4}[\s\.-]?\(?\d{2,4}\)?[\s\.-]?\d{3,4}[\s\.-]?\d{3,4}", readme_text)
@@ -797,7 +931,9 @@ async def fetch_linkedin_details(
     if not linkedin_url or "linkedin.com/in/" not in linkedin_url:
         return None, None, None, None, None, None, "individual"
 
-    clean_url = linkedin_url.split("?")[0].rstrip("/")
+    clean_url = clean_social_url(linkedin_url, platform="linkedin")
+    if not clean_url:
+        return None, None, None, None, None, None, "individual"
     avatar_url = None
     location = None
     name = None
@@ -955,10 +1091,6 @@ async def fetch_linkedin_details(
     return avatar_url, location, name, headline, company_data, education_data, role_type
 
 
-async def fetch_linkedin_avatar(linkedin_url: Optional[str], client: httpx.AsyncClient) -> Optional[str]:
-    res = await fetch_linkedin_details(linkedin_url, client)
-    return res[0] if res else None
-
 async def is_github_default_avatar(avatar_url: Optional[str], client: httpx.AsyncClient) -> bool:
     """
     Detects if a GitHub avatar is an auto-generated identicon (default geometric PNG).
@@ -976,250 +1108,6 @@ async def is_github_default_avatar(avatar_url: Optional[str], client: httpx.Asyn
     except Exception:
         pass
     return False
-
-
-def is_valid_linkedin_candidate(clean_url: str, title: str, snippet: str, target_handle: str, target_name: str, anchor: str) -> tuple[bool, int]:
-    title_l = title.lower()
-    snippet_l = snippet.lower()
-    url_l = clean_url.lower()
-    url_slug = clean_url.split("/in/")[-1].lower().rstrip("/")
-
-    # 1. Handle match
-    if target_handle:
-        h = target_handle.lower()
-        has_digits = bool(re.search(r"\d", h))
-        digits = re.findall(r"\d+", h)
-        h_no_num = re.sub(r"\d+", "", h)
-
-        if h == url_slug or f"-{h}" in url_slug or f"{h}-" in url_slug or f"-{h}-" in url_slug:
-            return True, 95
-
-        # If handle has numbers (e.g. mominawaqar12, sharafat706),
-        # do NOT match a generic name slug (like momina-waqar) unless the slug or title also contains those digits!
-        if has_digits:
-            distinctive_digits = [d for d in digits if len(d) >= 2]
-            if any(d in url_slug for d in distinctive_digits) or any(d in title_l for d in distinctive_digits):
-                if len(h_no_num) >= 4 and h_no_num in url_slug.replace("-", ""):
-                    return True, 90
-        else:
-            if len(h_no_num) >= 5 and h_no_num in url_slug.replace("-", ""):
-                return True, 90
-
-        # Handle strictly matches the PERSON's name before '-' or '|', NOT the company or job title!
-        title_person = title_l.split(" - ")[0].split(" | ")[0].strip()
-        title_person_slug = re.sub(r"[^a-z0-9]", "", title_person)
-        if len(h) >= 4 and (h in title_person.split() or h == title_person_slug):
-            return True, 85
-
-    # 2. Name match
-    if target_name:
-        parts = [p for p in target_name.lower().split() if len(p) >= 2]
-        if len(parts) >= 2:
-            first, last = parts[0], parts[-1]
-            has_first = first in title_l or first in url_l
-            has_last = last in title_l or last in url_l
-            if has_first and has_last:
-                if anchor:
-                    loc_tokens = [t.strip() for t in re.split(r"[,/]", anchor.lower()) if len(t.strip()) >= 3]
-                    if any(t in snippet_l or t in title_l for t in loc_tokens):
-                        return True, 90
-                return True, 80
-            if has_first and (last in snippet_l):
-                return True, 75
-        elif len(parts) == 1:
-            first = parts[0]
-            if (first in title_l or first in url_l):
-                return True, 70
-
-    return False, 0
-
-
-# ── Contextual Anchored LinkedIn Search ──────────────────────────────────────
-
-async def search_linkedin_anchored(
-    email: str,
-    email_type: str,
-    domain: str,
-    resolved_name: Optional[str],
-    resolved_location: Optional[str],
-    company_name: Optional[str],
-    gh_data: Optional[dict],
-    client: httpx.AsyncClient,
-) -> Optional[str]:
-    """
-    Step 1: Contextual Anchored Search for LinkedIn.
-    Anchors queries using verified context:
-    - Personal email handle: site:linkedin.com/in "{handle}"
-    - Corporate email: site:linkedin.com/in "{name}" "{company}"
-    - GitHub metadata: site:linkedin.com/in "{gh_name}" "{gh_location}"
-    - Name + location: site:linkedin.com/in "{name}" "{location}"
-    Strictly verifies candidate name and anchor keywords from title/snippet.
-    """
-    local_part = email.split("@")[0].lower() if "@" in email else ""
-    gh_user = gh_data if isinstance(gh_data, dict) else {}
-    gh_username = gh_user.get("username")
-    gh_name = gh_user.get("name")
-    gh_company = gh_user.get("company")
-    gh_location = gh_user.get("location")
-
-    # Filter out timezone pseudo-locations from text search strings
-    clean_location = resolved_location
-    if clean_location and clean_location.startswith("UTC"):
-        clean_location = None
-
-    # Derive company name if corporate email
-    corp_anchor = company_name
-    if not corp_anchor and email_type == "corporate" and domain:
-        corp_anchor = domain.split(".")[0].capitalize()
-
-    # If corporate email and no resolved_name, derive clean name from local_part
-    eff_name = resolved_name
-    if not eff_name and email_type == "corporate" and local_part:
-        if "." in local_part or "_" in local_part:
-            eff_name = local_part.replace(".", " ").replace("_", " ").title()
-        elif len(local_part) >= 3 and not re.match(r"^(admin|info|sales|support|contact|help|billing|team)", local_part):
-            eff_name = local_part.title()
-
-    # Formulate prioritized query candidate list
-    queries_to_try = []
-
-    # Priority A: If we have a verified full human name (>= 2 words, like "Atisam Hameed", "Sundar Pichai")
-    # Real human names are by far the most effective way to locate a person on LinkedIn!
-    has_full_name = bool(eff_name and len(eff_name.split()) >= 2)
-    clean_gh_comp = gh_company.lstrip("@").strip() if (gh_company and isinstance(gh_company, str)) else None
-    effective_org = corp_anchor or clean_gh_comp
-
-    if has_full_name:
-        # 1. Full Name + Organization Anchor (Highest precision for verified workplace)
-        if effective_org:
-            queries_to_try.append({
-                "q": f'site:linkedin.com/in "{eff_name}" "{effective_org}"',
-                "target_name": eff_name,
-                "anchor": effective_org,
-                "type": "corporate",
-            })
-        # 2. Full Name + Clean Location (Geo precision)
-        if clean_location:
-            queries_to_try.append({
-                "q": f'site:linkedin.com/in "{eff_name}" "{clean_location}"',
-                "target_name": eff_name,
-                "anchor": clean_location,
-                "type": "name_loc",
-            })
-        # 3. Full Name alone (Reliably matches LinkedIn title & URL slug)
-        queries_to_try.append({
-            "q": f'site:linkedin.com/in "{eff_name}"',
-            "target_name": eff_name,
-            "type": "name",
-        })
-
-    # Priority B: Corporate domain without full name
-    elif corp_anchor and eff_name:
-        queries_to_try.append({
-            "q": f'site:linkedin.com/in "{eff_name}" "{corp_anchor}"',
-            "target_name": eff_name,
-            "anchor": corp_anchor,
-            "type": "corporate",
-        })
-
-    # Priority C: Handles (GitHub username & email local_part)
-    if gh_username:
-        queries_to_try.append({
-            "q": f'site:linkedin.com/in "{gh_username}"',
-            "target_handle": gh_username,
-            "type": "handle",
-        })
-        # If gh_username is camelCase or has underscores, also try spaced/unquoted
-        spaced_gh = re.sub(r"([a-z])([A-Z])", r"\1 \2", gh_username).replace("_", " ").strip()
-        if " " in spaced_gh and spaced_gh.lower() != (eff_name or "").lower():
-            queries_to_try.append({
-                "q": f'site:linkedin.com/in "{spaced_gh}"',
-                "target_name": spaced_gh,
-                "type": "name",
-            })
-
-    if email_type == "personal" and local_part and len(local_part) >= 4:
-        if not re.match(r"^(admin|info|sales|support|contact|help|hello)", local_part):
-            queries_to_try.append({
-                "q": f'site:linkedin.com/in "{local_part}"',
-                "target_handle": local_part,
-                "type": "handle",
-            })
-            # Also try unquoted handle (helps match hyphenated slugs like ahtisham-dilawar)
-            queries_to_try.append({
-                "q": f'site:linkedin.com/in {local_part}',
-                "target_handle": local_part,
-                "target_name": eff_name,
-                "type": "handle",
-            })
-            spaced_local = re.sub(r"([a-z])([A-Z])", r"\1 \2", local_part).replace(".", " ").replace("_", " ").title()
-            if " " in spaced_local and spaced_local.lower() != (eff_name or "").lower():
-                queries_to_try.append({
-                    "q": f'site:linkedin.com/in "{spaced_local}"',
-                    "target_name": spaced_local,
-                    "type": "name",
-                })
-
-    # Priority D: Direct Email Search
-    queries_to_try.append({
-        "q": f'"{email}" site:linkedin.com/in',
-        "target_email": email,
-        "type": "email",
-    })
-
-    # Deduplicate queries while preserving order
-    seen_q = set()
-    unique_queries = []
-    for item in queries_to_try:
-        q_str = item["q"]
-        if q_str not in seen_q:
-            seen_q.add(q_str)
-            unique_queries.append(item)
-
-    # Prioritize the top 4 most targeted queries
-    active_queries = unique_queries[:4]
-
-    # Execute search queries
-    for item in active_queries:
-        query = item["q"]
-        target_name = item.get("target_name", "")
-        target_handle = item.get("target_handle", "")
-        anchor = item.get("anchor", "")
-
-        print(f"[LinkedIn Search] Sending query ({item.get('type', 'heuristic')}): {query}", flush=True)
-
-        # ── Strategy 1: Local SearXNG Metasearch Engine (Primary 100% Free Engine) ──
-        searxng_url = os.getenv("SEARXNG_URL", "http://localhost:8888/search")
-        try:
-            sx_resp = await client.get(
-                searxng_url,
-                params={"q": query, "format": "json"},
-                timeout=7.0,
-            )
-            if sx_resp.status_code == 200:
-                sx_results = sx_resp.json().get("results", [])
-                for r in sx_results:
-                    link = r.get("url", "")
-                    if "linkedin.com/in/" not in link or "/in/dir/" in link or "/pub/dir/" in link:
-                        continue
-                    clean_url = link.split("?")[0].rstrip("/")
-                    title = (r.get("title") or "").lower()
-                    snippet = (r.get("content") or "").lower()
-                    is_valid, conf = is_valid_linkedin_candidate(clean_url, title, snippet, target_handle, target_name, anchor)
-                    if is_valid:
-                        print(f"[LinkedIn Search] ✓ Verified LinkedIn candidate (SearXNG): {clean_url} (Confidence: {conf}%)", flush=True)
-                        return clean_url, None, conf
-        except Exception as e:
-            print(f"[LinkedIn Search] [-] SearXNG error/offline: {e}", flush=True)
-
-    return None, None, 0
-
-
-# ── AbstractAPI (Deprecated & Removed for Performance) ─────────────────────────
-
-async def lookup_abstractapi(email: str, client: Optional[httpx.AsyncClient] = None) -> dict:
-    """Deprecated: AbstractAPI removed due to quota exhaustion & latency overhead."""
-    return {}
 
 
 def _strip_html(text: str) -> str:
@@ -1528,7 +1416,7 @@ async def run_lookup(email: str) -> dict:
             "phone": None,
             "address": None,
             "company": None,
-            "email_quality": {"deliverability": "invalid"},
+            "deliverability": "invalid",
         }
 
     domain = email.split("@")[-1] if "@" in email else ""
@@ -1543,7 +1431,8 @@ async def run_lookup(email: str) -> dict:
 
     print(f"\n[Lookup Engine] >>> Starting reverse lookup for: {email} ({email_type.upper()})", flush=True)
 
-    async with httpx.AsyncClient(timeout=8.0) as client:
+    limits = httpx.Limits(max_connections=80, max_keepalive_connections=35)
+    async with httpx.AsyncClient(timeout=8.0, limits=limits) as client:
         print("[Lookup Engine] Querying base sources (Gravatar, GitHub, Company DB)...", flush=True)
         # Phase 1: Run all base enrichment sources concurrently
         gravatar, github, company, harvested = await asyncio.gather(
@@ -1602,12 +1491,26 @@ async def run_lookup(email: str) -> dict:
                 if remainder.isalpha():
                     resolved_name = f"{resolved_name} {remainder.capitalize()}"
         elif not resolved_name and local_part:
-            if "." in local_part or "_" in local_part:
-                clean_parts = local_part.replace(".", " ").replace("_", " ").split()
-                if all(p.isalpha() for p in clean_parts):
-                    resolved_name = " ".join(p.capitalize() for p in clean_parts)
+            if "." in local_part or "_" in local_part or "-" in local_part:
+                raw_parts = [re.sub(r"\d+", "", p).strip("._-") for p in re.split(r"[._+-]", local_part)]
+                clean_parts = [p for p in raw_parts if p and len(p) >= 2]
+                if clean_parts:
+                    parsed_chunks = []
+                    for i, cp in enumerate(clean_parts):
+                        if i == 0 and cp.lower() in TITLE_PREFIXES:
+                            parsed_chunks.append(cp.capitalize())
+                            continue
+                        sub_split = split_concatenated_name(cp)
+                        if sub_split:
+                            parsed_chunks.extend(sub_split.split())
+                        elif cp.isalpha():
+                            parsed_chunks.append(cp.capitalize())
+                    if parsed_chunks and parsed_chunks[-1].lower() in ROLE_SUFFIXES and len(parsed_chunks) >= 3:
+                        parsed_chunks = parsed_chunks[:-1]
+                    if len(parsed_chunks) >= 2 or (parsed_chunks and parsed_chunks[0].lower() not in TITLE_PREFIXES):
+                        resolved_name = " ".join(parsed_chunks)
 
-        # Parse concatenated names without delimiters (e.g. hassanrashid55 -> Hassan Rashid)
+        # Parse concatenated names without delimiters (e.g. hassanrashid55 -> Hassan Rashid, chfahadahmad11 -> Ch Fahad Ahmad)
         if not resolved_name or not is_clean_human_name(resolved_name):
             cat_name = split_concatenated_name(local_part)
             if cat_name:
@@ -1677,27 +1580,7 @@ async def run_lookup(email: str) -> dict:
         linkedin_loc = None
         linkedin_confidence = 100 if linkedin_url else 0
 
-        if not linkedin_url:
-            comp_name = (
-                (company.get("name") if isinstance(company, dict) else None)
-                or (github.get("company") if isinstance(github, dict) else None)
-            )
-            raw_loc_anchor = (
-                (github.get("explicit_location") if isinstance(github, dict) else None)
-                or (gravatar.get("location") if isinstance(gravatar, dict) else None)
-            )
-            linkedin_url, linkedin_loc, linkedin_confidence = await search_linkedin_anchored(
-                email=email,
-                email_type=email_type,
-                domain=domain,
-                resolved_name=resolved_name,
-                resolved_location=raw_loc_anchor,
-                company_name=comp_name,
-                gh_data=github if isinstance(github, dict) else None,
-                client=client,
-            )
-            if linkedin_url:
-                linkedin_source = "search"
+        # If not direct/authoritative, LinkedIn candidate discovery is handled concurrently in Phase 3 (Social Discovery)
 
         # Fetch authentic LinkedIn details (avatar, human location, full name, headline, company, education, role)
         li_avatar = None
@@ -1717,88 +1600,144 @@ async def run_lookup(email: str) -> dict:
             if f_edu: li_edu = f_edu
             if f_role: li_role = f_role
 
+        # ── Name Sanity / Conflict Guard for External LinkedIn Profile ──
+        # If the fetched LinkedIn profile has a clean human name that completely conflicts with all known identity clues
+        # (e.g. GitHub name, Gravatar name, or email prefix), reject this LinkedIn profile as a mismatched or hijacked link.
+        is_li_name_conflict = False
+        target_name_clues = []
+        if resolved_name:
+            target_name_clues.append(resolved_name)
+        if github and isinstance(github, dict) and github.get("name"):
+            target_name_clues.append(github["name"])
+        if github and isinstance(github, dict) and github.get("username"):
+            target_name_clues.append(github["username"])
+        if local_part:
+            target_name_clues.append(local_part)
+
+        if li_name and target_name_clues and is_clean_human_name(li_name):
+            li_tokens = set(re.findall(r"[a-zA-Z]{3,}", li_name.lower()))
+            clue_tokens = set()
+            for clue in target_name_clues:
+                for tok in re.findall(r"[a-zA-Z]{3,}", clue.lower()):
+                    clue_tokens.add(tok)
+
+            has_token_overlap = bool(li_tokens & clue_tokens)
+            has_sub_match = any(
+                any(t in c or c in t for c in clue_tokens if len(c) >= 4)
+                for t in li_tokens if len(t) >= 4
+            )
+
+            if not has_token_overlap and not has_sub_match:
+                sim = jaro_winkler_similarity(li_name.lower(), resolved_name.lower()) if resolved_name else 0.0
+                if sim < 0.60:
+                    is_li_name_conflict = True
+                    print(f"[Lookup Engine] [WARN] Rejecting LinkedIn profile {linkedin_url} due to severe name conflict: LinkedIn='{li_name}' vs Target clues={target_name_clues}", flush=True)
+
+        if is_li_name_conflict:
+            linkedin_url = None
+            linkedin_source = None
+            linkedin_loc = None
+            linkedin_confidence = 0
+            li_avatar = None
+            li_name = None
+            li_headline = None
+            li_comp = None
+            li_edu = None
+            li_role = "individual"
+
         # Fallback to LinkedIn name if resolved_name was not found through other channels
         if not resolved_name and li_name:
             resolved_name = li_name
 
         # ── Persona Role and Workplace / Education Card Resolution ──
-        if li_role == "student" and li_edu:
-            s_name = li_edu.get("name", "University")
-            s_logo = li_edu.get("logo")
-            s_dom = "fast.nu.edu.pk" if ("fast" in s_name.lower() or "emerging sciences" in s_name.lower()) else None
-            company = {
-                "name": s_name,
-                "domain": s_dom,
-                "logo": s_logo or (f"https://www.google.com/s2/favicons?domain={s_dom}&sz=128" if s_dom else None),
-                "type": "education",
-                "role": "Student",
-                "industry": "Higher Education",
-                "country": None,
-                "rank": None,
-                "email_format": None,
-                "mx_provider": None,
-            }
-        elif li_role == "faculty" and (li_edu or li_comp):
-            f_target = li_edu or li_comp
-            f_name = f_target.get("name", "University")
-            f_logo = f_target.get("logo")
-            f_dom = "fast.nu.edu.pk" if ("fast" in f_name.lower() or "emerging sciences" in f_name.lower()) else None
-            company = {
-                "name": f_name,
-                "domain": f_dom,
-                "logo": f_logo or (f"https://www.google.com/s2/favicons?domain={f_dom}&sz=128" if f_dom else None),
-                "type": "academic_workplace",
-                "role": "Faculty / Academic",
-                "industry": "Higher Education & Research",
-                "country": None,
-                "rank": None,
-                "email_format": None,
-                "mx_provider": None,
-            }
+        has_verified_li = bool(linkedin_url and linkedin_confidence == 100 and linkedin_source in ("github", "gravatar", "wikidata", "harvested"))
+        is_corporate_domain_company = bool(email_type == "corporate" and company and isinstance(company, dict) and (company.get("domain") == domain or company.get("rank") is not None))
+
+        if not is_corporate_domain_company:
+            if li_role == "student" and li_edu:
+                s_name = li_edu.get("name", "University")
+                s_logo = li_edu.get("logo")
+                s_dom = "fast.nu.edu.pk" if ("fast" in s_name.lower() or "emerging sciences" in s_name.lower()) else None
+                company = {
+                    "name": s_name,
+                    "domain": s_dom,
+                    "logo": s_logo or (f"https://www.google.com/s2/favicons?domain={s_dom}&sz=128" if s_dom else None),
+                    "type": "education",
+                    "role": "Student",
+                    "industry": "Higher Education",
+                    "country": None,
+                    "rank": None,
+                    "email_format": None,
+                    "mx_provider": None,
+                }
+            elif li_role == "faculty" and (li_edu or li_comp):
+                f_target = li_edu or li_comp
+                f_name = f_target.get("name", "University")
+                f_logo = f_target.get("logo")
+                f_dom = "fast.nu.edu.pk" if ("fast" in f_name.lower() or "emerging sciences" in f_name.lower()) else None
+                company = {
+                    "name": f_name,
+                    "domain": f_dom,
+                    "logo": f_logo or (f"https://www.google.com/s2/favicons?domain={f_dom}&sz=128" if f_dom else None),
+                    "type": "academic_workplace",
+                    "role": "Faculty / Academic",
+                    "industry": "Higher Education & Research",
+                    "country": None,
+                    "rank": None,
+                    "email_format": None,
+                    "mx_provider": None,
+                }
+            else:
+                # Corporate employee or regular workplace
+                if li_comp and li_comp.get("name") and has_verified_li:
+                    c_name = li_comp["name"]
+                    c_logo = li_comp.get("logo")
+                    c_slug = li_comp.get("url", "").split("/company/")[-1].strip("/") if li_comp.get("url") else None
+                    c_res = await lookup_company(domain="", client=client, company_hint=c_name)
+                    c_dom = (c_res.get("domain") if c_res else None) or c_slug or (company.get("domain") if isinstance(company, dict) else "")
+                    company = {
+                        "name": c_name,
+                        "domain": c_dom,
+                        "logo": c_logo or (c_res.get("logo") if c_res else None) or (f"https://www.google.com/s2/favicons?domain={c_dom}&sz=128" if c_dom else None),
+                        "industry": c_res.get("industry") if c_res else None,
+                        "country": c_res.get("country") if c_res else None,
+                        "rank": c_res.get("rank") if c_res else None,
+                        "type": "workplace",
+                        "alma_mater": li_edu.get("name") if li_edu else None,
+                        "email_format": None,
+                        "mx_provider": None,
+                    }
+                elif not company and harvested and harvested.get("company"):
+                    h_c_name = harvested["company"]
+                    c_res = await lookup_company(domain="", client=client, company_hint=h_c_name)
+                    c_dom = (c_res.get("domain") if c_res else "") or ""
+                    company = {
+                        "name": h_c_name,
+                        "domain": c_dom,
+                        "logo": (c_res.get("logo") if c_res else None) or (f"https://www.google.com/s2/favicons?domain={c_dom}&sz=128" if c_dom else None),
+                        "industry": c_res.get("industry") if c_res else None,
+                        "country": c_res.get("country") if c_res else None,
+                        "type": "workplace",
+                        "alma_mater": li_edu.get("name") if li_edu else None,
+                        "email_format": None,
+                        "mx_provider": None,
+                    }
+                elif company and isinstance(company, dict):
+                    if not company.get("logo") and li_comp and li_comp.get("logo"):
+                        company["logo"] = li_comp["logo"]
+                    if li_edu and not company.get("alma_mater"):
+                        company["alma_mater"] = li_edu.get("name")
         else:
-            # Corporate employee or regular workplace
-            if li_comp and li_comp.get("name"):
-                c_name = li_comp["name"]
-                c_logo = li_comp.get("logo")
-                c_slug = li_comp.get("url", "").split("/company/")[-1].strip("/") if li_comp.get("url") else None
-                c_res = await lookup_company(domain="", client=client, company_hint=c_name)
-                c_dom = (c_res.get("domain") if c_res else None) or c_slug or (company.get("domain") if isinstance(company, dict) else "")
-                company = {
-                    "name": c_name,
-                    "domain": c_dom,
-                    "logo": c_logo or (c_res.get("logo") if c_res else None) or (f"https://www.google.com/s2/favicons?domain={c_dom}&sz=128" if c_dom else None),
-                    "industry": c_res.get("industry") if c_res else None,
-                    "country": c_res.get("country") if c_res else None,
-                    "rank": c_res.get("rank") if c_res else None,
-                    "type": "workplace",
-                    "alma_mater": li_edu.get("name") if li_edu else None,
-                    "email_format": None,
-                    "mx_provider": None,
-                }
-            elif not company and harvested and harvested.get("company"):
-                h_c_name = harvested["company"]
-                c_res = await lookup_company(domain="", client=client, company_hint=h_c_name)
-                c_dom = (c_res.get("domain") if c_res else "") or ""
-                company = {
-                    "name": h_c_name,
-                    "domain": c_dom,
-                    "logo": (c_res.get("logo") if c_res else None) or (f"https://www.google.com/s2/favicons?domain={c_dom}&sz=128" if c_dom else None),
-                    "industry": c_res.get("industry") if c_res else None,
-                    "country": c_res.get("country") if c_res else None,
-                    "type": "workplace",
-                    "alma_mater": li_edu.get("name") if li_edu else None,
-                    "email_format": None,
-                    "mx_provider": None,
-                }
-            elif company and isinstance(company, dict):
-                if not company.get("logo") and li_comp and li_comp.get("logo"):
+            # Corporate email domain is authoritative: only enrich non-conflicting metadata
+            if company and isinstance(company, dict):
+                if not company.get("logo") and li_comp and li_comp.get("logo") and has_verified_li:
                     company["logo"] = li_comp["logo"]
                 if li_edu and not company.get("alma_mater"):
                     company["alma_mater"] = li_edu.get("name")
 
         # ── Location Hierarchy with Country Normalization Guarantee ──
         raw_location = (
-            linkedin_loc
+            (linkedin_loc if has_verified_li else None)
             or (github.get("explicit_location") if github else None)
             or gravatar.get("location")
             or (harvested.get("location") if harvested else None)
@@ -1807,18 +1746,12 @@ async def run_lookup(email: str) -> dict:
         fb_country = github.get("commit_timezone") if github else None
         resolved_location = normalize_location(raw_location, fallback_country=fb_country)
 
-        # ── Profile picture hierarchy (Highest Priority: LinkedIn) ──
-        # 1. LinkedIn avatar (formal, authentic human headshot) — HIGHEST PRIORITY
-        # 2. Harvested LinkedIn avatar from verified DB record
-        # 3. GitHub custom avatar (non-identicon)
-        # 4. Harvested DB avatar
-        # 5. Gravatar (verified human photo)
-        # 6. Fallback to GitHub default identicon
+        # ── Profile picture hierarchy (Highest Priority: Verified LinkedIn) ──
         gh_avatar = github.get("avatar") if (github and isinstance(github, dict)) else None
         is_gh_default = await is_github_default_avatar(gh_avatar, client) if gh_avatar else False
         harvested_li_avatar = harvested.get("avatar_url") if (harvested and "licdn.com" in (harvested.get("avatar_url") or "")) else None
 
-        if li_avatar:
+        if li_avatar and has_verified_li:
             resolved_avatar = li_avatar
         elif harvested_li_avatar:
             resolved_avatar = harvested_li_avatar
@@ -1944,6 +1877,11 @@ async def run_lookup(email: str) -> dict:
     social_candidates = []
     # Only treat LinkedIn as 100% verified if corroborated by an authoritative source
     has_verified_li = bool(linkedin_url and linkedin_confidence == 100 and linkedin_source in ("github", "gravatar", "wikidata", "harvested"))
+
+    phase1_elapsed_ms = int((time.time() - start) * 1000)
+    print(f"\n[Lookup Engine] Base Enrichment (Phase 1 & 2) completed in {phase1_elapsed_ms}ms (Gravatar, GitHub, Wikidata, Company, DB)", flush=True)
+    print(f"[Lookup Engine] Launching Phase 3: High-Concurrency Social Discovery...", flush=True)
+
     try:
         raw_candidates, by_plat = await search_social_candidates(
             email=email,
@@ -1977,10 +1915,12 @@ async def run_lookup(email: str) -> dict:
                 raw_candidates.insert(0, cand_li)
 
         # ── Zero Duplicate Platform Rule ──
-        for p in ["linkedin", "instagram", "twitter", "facebook", "tiktok", "pinterest"]:
+        for p in ["linkedin", "github", "instagram", "twitter", "facebook", "tiktok", "pinterest", "spotify"]:
             prof = profiles.get(p)
             is_direct_verified = False
-            if isinstance(prof, dict):
+            if p == "github":
+                is_direct_verified = bool(prof)
+            elif isinstance(prof, dict):
                 is_direct_verified = (
                     prof.get("verified") is True
                     or prof.get("source") in ("github", "gravatar", "wikidata", "harvested")
@@ -1992,18 +1932,19 @@ async def run_lookup(email: str) -> dict:
                 # Platform is already confirmed and verified in top profiles — clear candidate accordion
                 by_plat[p] = []
             else:
-                # No confirmed direct profile exists — remove from top profiles so it only appears in candidate accordion
-                profiles.pop(p, None)
-                profiles.pop(f"{p}_confidence", None)
-                profiles.pop(f"{p}_verified", None)
-                profiles.pop(f"{p}_source", None)
+                if p != "github":
+                    # No confirmed direct profile exists — remove from top profiles so it only appears in candidate accordion
+                    profiles.pop(p, None)
+                    profiles.pop(f"{p}_confidence", None)
+                    profiles.pop(f"{p}_verified", None)
+                    profiles.pop(f"{p}_source", None)
 
         social_candidates = raw_candidates
         candidates_by_platform = by_plat
     except Exception as e:
         print(f"[Social Discovery] Candidate search error: {e}", flush=True)
         social_candidates = []
-        candidates_by_platform = {"linkedin": [], "instagram": [], "twitter": [], "facebook": [], "tiktok": [], "pinterest": []}
+        candidates_by_platform = {"linkedin": [], "instagram": [], "twitter": [], "facebook": [], "tiktok": [], "pinterest": [], "spotify": []}
 
     # ── Fallback Person Display Name from Clean Email Username ──
     # Note: Speculative social candidates are never promoted to the person card to prevent unverified data pollution
@@ -2027,22 +1968,7 @@ async def run_lookup(email: str) -> dict:
         company = None
 
     # ── Phone from GitHub bio ──
-    phone = github.get("phone_froAm_bio") if github else None
-
-    # ── Email quality & deliverability (Instant Local Calculation) ──
-    email_quality = {
-        "quality_score": 0.90 if email_type == "corporate" else 0.75,
-        "deliverability": "deliverable",
-        "is_disposable": False,
-        "is_free_email": email_type == "personal",
-        "is_catchall": False,
-        "is_role_account": False,
-        "smtp_provider": domain.split(".")[0].capitalize() if domain else None,
-        "autocorrect": None,
-        "address_risk": "Low",
-        "domain_risk": "Low",
-        "domain_age_days": None,
-    }
+    phone = github.get("phone_from_bio") if github else None
 
     # Detect typos in domain or provider
     autocorrect_suggestion = detect_email_typo(email)
@@ -2064,6 +1990,6 @@ async def run_lookup(email: str) -> dict:
         "phone": phone,
         "address": None,
         "company": company,
-        "email_quality": email_quality,
         "autocorrect": autocorrect_suggestion,
     }
+

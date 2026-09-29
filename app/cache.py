@@ -30,8 +30,8 @@ async def init_db():
         await db.commit()
 
 
-async def get_lookup_cache(email: str, ttl_hours: int = 24) -> Optional[dict]:
-    """Retrieve a cached lookup result if it exists and is not expired."""
+async def get_lookup_cache(email: str, ttl_hours: Optional[int] = None) -> Optional[dict]:
+    """Retrieve a cached lookup result. Permanent by default unless ttl_hours is specified."""
     try:
         async with aiosqlite.connect(DB_PATH, timeout=30.0) as db:
             await db.execute("PRAGMA journal_mode=WAL;")
@@ -43,16 +43,18 @@ async def get_lookup_cache(email: str, ttl_hours: int = 24) -> Optional[dict]:
                 row = await cursor.fetchone()
                 if row:
                     result, cached_at = row
-                    age_hours = (time.time() - cached_at) / 3600
-                    if age_hours < ttl_hours:
-                        return json.loads(result)
+                    if ttl_hours is not None:
+                        age_hours = (time.time() - cached_at) / 3600
+                        if age_hours >= ttl_hours:
+                            return None
+                    return json.loads(result)
     except Exception:
         pass
     return None
 
 
 async def set_lookup_cache(email: str, result: dict):
-    """Store a lookup result in the cache."""
+    """Store a lookup result in the cache permanently."""
     try:
         async with aiosqlite.connect(DB_PATH, timeout=30.0) as db:
             await db.execute("PRAGMA journal_mode=WAL;")
@@ -79,8 +81,8 @@ async def delete_lookup_cache(email: str) -> bool:
         return False
 
 
-async def get_verify_cache(email: str, ttl_hours: int = 6) -> Optional[dict]:
-    """Retrieve a cached verification result."""
+async def get_verify_cache(email: str, ttl_hours: Optional[int] = None) -> Optional[dict]:
+    """Retrieve a cached verification result. Permanent by default unless ttl_hours is specified."""
     try:
         async with aiosqlite.connect(DB_PATH, timeout=30.0) as db:
             await db.execute("PRAGMA journal_mode=WAL;")
@@ -92,9 +94,11 @@ async def get_verify_cache(email: str, ttl_hours: int = 6) -> Optional[dict]:
                 row = await cursor.fetchone()
                 if row:
                     result, cached_at = row
-                    age_hours = (time.time() - cached_at) / 3600
-                    if age_hours < ttl_hours:
-                        return json.loads(result)
+                    if ttl_hours is not None:
+                        age_hours = (time.time() - cached_at) / 3600
+                        if age_hours >= ttl_hours:
+                            return None
+                    return json.loads(result)
     except Exception:
         pass
     return None
